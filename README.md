@@ -1,119 +1,80 @@
 # %%
-# Import libraries
+import pandas as pd
+
+# Load dataset from local file
+df = pd.read_csv("creditcard.csv")
+
+# Display first few rows
+print(df.head())
+
+# Check dataset information
+print(df.info())
+
+
+# %%
+# Display dataset info
+print(df.head())
+print(df.info())
+
+
+# %%
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# %%
+# Check class distribution
+plt.figure(figsize=(6, 4))
+sns.countplot(x="Class", data=df)
+plt.title("Fraud vs. Non-Fraud Transactions")
+plt.show()
+
+# Separate features and target
+X = df.drop(columns=["Class"])
+y = df["Class"]
+
+# %%
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
-from xgboost import XGBRegressor
-from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
-
-# Load data
-df = pd.read_csv("data.csv")
-
-# %%
-# Data cleaning
-# Remove extreme outliers (cars priced over $200k)
-df = df[df['MSRP'] < 200_000]
-
-# Handle missing values
-df = df.dropna(subset=['Engine HP', 'MSRP', 'city mpg'])
-df['Market Category'] = df['Market Category'].fillna('Unknown')
-
-# Feature engineering
-df['Age'] = 2023 - df['Year']
-df['HP_per_cylinder'] = df['Engine HP'] / df['Engine Cylinders'].replace(0, 1)  # Avoid division by zero
-df['log_MSRP'] = np.log(df['MSRP'])  # Log-transform target
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
 
 # %%
-# Select features
-features = [
-    'Engine HP', 'city mpg', 'Age', 'HP_per_cylinder',
-    'Make', 'Vehicle Size', 'Transmission Type', 'Driven_Wheels'
-]
+# Standardize numerical features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Split data into training & testing sets (80% train, 20% test)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42, stratify=y)
+
+# Train Random Forest Classifier
+clf = RandomForestClassifier(n_estimators=100, random_state=42)
+clf.fit(X_train, y_train)
+
+# Make predictions
+y_pred = clf.predict(X_test)
 
 # %%
-# Preprocessing
-X = pd.get_dummies(df[features], drop_first=True)
-y = df['log_MSRP']  # Use log-transformed target
+# Evaluate model
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred)
+roc_auc = roc_auc_score(y_test, y_pred)
 
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"ROC-AUC Score: {roc_auc:.4f}")
 
-# %%
-# Train XGBoost model with tuned parameters
-model = XGBRegressor(
-    n_estimators=1000,
-    learning_rate=0.05,
-    max_depth=7,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    random_state=42
-)
-model.fit(X_train, y_train)
-
-
-# %%
-# Evaluate
-y_pred_log = model.predict(X_test)
-y_pred = np.exp(y_pred_log)  # Convert back to original scale
-y_test_exp = np.exp(y_test)
-
-print(f"MAE: ${mean_absolute_error(y_test_exp, y_pred):,.2f}")
-print(f"R²: {r2_score(y_test_exp, y_pred):.2f}")
-
-# %%
-# Feature importance
-importance = pd.Series(model.feature_importances_, index=X.columns)
-plt.figure(figsize=(10, 6))
-importance.nlargest(15).sort_values().plot(kind='barh')
-plt.title('Top 15 Feature Importances')
-plt.xlabel('XGBoost Importance Score')
+# Confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["Non-Fraud", "Fraud"], yticklabels=["Non-Fraud", "Fraud"])
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.title("Confusion Matrix")
 plt.show()
 
-# %%
-# Actual vs Predicted plot
-plt.figure(figsize=(10, 6))
-plt.scatter(y_test_exp, y_pred, alpha=0.6)
-plt.plot([y_test_exp.min(), y_test_exp.max()], 
-         [y_test_exp.min(), y_test_exp.max()], 'k--', lw=2)
-plt.xlabel('Actual Price')
-plt.ylabel('Predicted Price')
-plt.title('Actual vs Predicted Car Prices')
-plt.show()
 
-# %%
-# Residual analysis
-residuals = y_test_exp - y_pred
-plt.figure(figsize=(10, 6))
-sns.histplot(residuals, kde=True)
-plt.title('Residual Distribution')
-plt.xlabel('Prediction Error ($)')
-plt.show()
-
-# %%
-# After predictions, map back to original data using indices
-test_indices = X_test.index  # Get the indices of the test set
-df_test = df.loc[test_indices, ['Make', 'Model']].copy()  # Pull original 'Make' and 'Model'
-df_test['Actual'] = y_test_exp  # Actual prices
-df_test['Predicted'] = y_pred   # Model predictions
-
-# Calculate pricing gap
-df_test['Pricing Gap (%)'] = ((df_test['Actual'] - df_test['Predicted']) / df_test['Predicted']) * 100
-
-# Top 10 underpriced cars
-print(df_test.sort_values('Pricing Gap (%)').head(10))
-
-# %%
-
-🏆 Performance Metrics
-Metric	Training Score	Test Score
-MAE	$1,215	$1,872
-R²	0.98	0.97
-💡 Business Insights
-Luxury EVs show consistent 8-12% price premiums
-
-SUVs with 4WD have 15% higher residual values
-
-Identified 23 underpriced performance vehicles in test set
